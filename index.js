@@ -20,6 +20,11 @@ const PORT = process.env.PORT || 5000;
 app.post('/signup', async (req, res) => {
     const { first_name, last_name, email, password, user_type_id, mobile_phone } = req.body;
   
+    // Validate request body
+    if (!first_name || !last_name || !email || !password || !user_type_id || !mobile_phone) {
+      return res.status(400).json({ error: 'All fields are required' });
+    }
+  
     try {
       // Check if the email already exists
       const userExists = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
