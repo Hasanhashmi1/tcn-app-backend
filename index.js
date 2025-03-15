@@ -10,7 +10,7 @@ app.use(express.json());
 app.use(cors());
 
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+    connectionString: process.env.DATABASE_URL,
 });
 
 const PORT = process.env.PORT || 5000;
@@ -19,70 +19,75 @@ const PORT = process.env.PORT || 5000;
 
 app.post('/signup', async (req, res) => {
     const { first_name, last_name, email, password, user_type_id, mobile_phone } = req.body;
-  
+
     // Validate request body
     if (!first_name || !last_name || !email || !password || !user_type_id || !mobile_phone) {
-      return res.status(400).json({ error: 'All fields are required' });
+        return res.status(400).json({ error: 'All fields are required' });
     }
-  
+
+    // Validate mobile number (must be exactly 10 digits)
+    if (!/^\d{10}$/.test(mobile_phone)) {
+        return res.status(400).json({ error: 'Mobile number must be exactly 10 digits' });
+    }
+
     try {
-      // Check if the email already exists
-      const userExists = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
-      if (userExists.rows.length > 0) {
-        return res.status(400).json({ error: 'Email already exists' });
-      }
-  
-      // Hash the password
-      const salt = await bcrypt.genSalt(10);
-      const passwordHash = await bcrypt.hash(password, salt);
-  
-      // Insert user into the database
-      const result = await pool.query(
-        `INSERT INTO users 
+        // Check if the email already exists
+        const userExists = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+        if (userExists.rows.length > 0) {
+            return res.status(400).json({ error: 'Email already exists' });
+        }
+
+        // Hash the password
+        const salt = await bcrypt.genSalt(10);
+        const passwordHash = await bcrypt.hash(password, salt);
+
+        // Insert user into the database
+        const result = await pool.query(
+            `INSERT INTO users 
         (first_name, last_name, email, password, user_type_id, mobile_phone, created_at, updated_at) 
         VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW()) 
         RETURNING id, first_name, last_name, email, user_type_id, mobile_phone`,
-        [first_name, last_name, email, passwordHash, user_type_id, mobile_phone]
-      );
-  
-      res.status(201).json({ message: 'User created', user: result.rows[0] });
+            [first_name, last_name, email, passwordHash, user_type_id, mobile_phone]
+        );
+
+        res.status(201).json({ message: 'User created', user: result.rows[0] });
     } catch (err) {
-      console.error(err);
-      res.status(500).json({ error: 'An error occurred during signup' });
+        console.error(err);
+        res.status(500).json({ error: 'An error occurred during signup' });
     }
-  });
+});
 
 // Login Route
 app.post('/login', async (req, res) => {
     const { email, password } = req.body;
-  
+
     try {
-      // Find the user by email
-      const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
-      const user = result.rows[0];
-  
-      if (!user) {
-        return res.status(404).json({ error: 'User not found' });
-      }
-  
-      // Compare passwords
-      const isMatch = await bcrypt.compare(password, user.password);
-      if (!isMatch) {
-        return res.status(400).json({ error: 'Invalid credentials' });
-      }
-  
-      // Generate a JWT token
-      const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: '1h' });
-  
-      res.status(200).json({ message: 'Login successful', token });
+        // Find the user by email
+        const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
+        const user = result.rows[0];
+
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        // Compare passwords
+        const isMatch = await bcrypt.compare(password, user.password);
+        if (!isMatch) {
+            return res.status(400).json({ error: 'Invalid credentials' });
+        }
+
+        // Generate a JWT token
+        const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: '1h' });
+
+        res.status(200).json({ message: 'Login successful', token });
     } catch (err) {
-      console.error(err);
-      res.status(500).json({ error: 'An error occurred during login' });
+        console.error(err);
+        res.status(500).json({ error: 'An error occurred during login' });
     }
-  });
+});
 
 // Start the server
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+    console.log(`Server running on port ${PORT}`);
 });
 
