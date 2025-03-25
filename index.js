@@ -55,7 +55,7 @@ app.post('/orders', async (req, res) => {
         customer_id,
         product_id,
         paymentmethod_id,
-        recharge_by_Id,  // Corrected to match your schema's exact casing
+        recharge_by_Id,  // This JavaScript comment is fine (outside SQL string)
         order_status_id,
         paid_amount,
         due_amount,
@@ -63,7 +63,7 @@ app.post('/orders', async (req, res) => {
         portal_recharge_status_id
     } = req.body;
 
-    // Validate ALL required fields from your schema
+    // Input validation (JavaScript comment - OK)
     if (!customer_id || !product_id || !paymentmethod_id || 
         !order_status_id || paid_amount === undefined || 
         due_amount === undefined || !portal_recharge_status_id) {
@@ -84,14 +84,20 @@ app.post('/orders', async (req, res) => {
     try {
         const result = await pool.query(
             `INSERT INTO orders (
-                customer_id, product_id, paymentmethod_id, recharge_by_Id,  // Corrected here
+                customer_id, product_id, paymentmethod_id, recharge_by_Id,
                 order_status_id, paid_amount, due_amount, order_comments,
                 portal_recharge_status_id, created_at, updated_at
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
             RETURNING *`,
             [
-                customer_id, product_id, paymentmethod_id, recharge_by_Id || null,  // Corrected here
-                order_status_id, paid_amount, due_amount, order_comments || null,
+                customer_id, 
+                product_id, 
+                paymentmethod_id, 
+                recharge_by_Id || null,
+                order_status_id, 
+                paid_amount, 
+                due_amount, 
+                order_comments || null,
                 portal_recharge_status_id
             ]
         );
@@ -102,11 +108,10 @@ app.post('/orders', async (req, res) => {
         res.status(500).json({ 
             error: 'Failed to create order',
             details: err.message,
-            hint: "Check if: (1) All foreign keys exist, (2) Column names match exactly"
+            hint: "Check: (1) Foreign keys exist (2) Column names match exactly (3) No syntax errors in query"
         });
     }
 });
-
 // Update order
 app.put('/orders/:id', async (req, res) => {
     const { id } = req.params;
