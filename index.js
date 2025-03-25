@@ -49,13 +49,13 @@ app.get('/orders/:id', async (req, res) => {
     }
 });
 
-// Create new order
+// Create new order - CORRECTED to match your schema
 app.post('/orders', async (req, res) => {
     const {
         customer_id,
         product_id,
         paymentmethod_id,
-        recharge_by_id,
+        recharge_by_Id,  // Corrected to match your schema's exact casing
         order_status_id,
         paid_amount,
         due_amount,
@@ -63,32 +63,47 @@ app.post('/orders', async (req, res) => {
         portal_recharge_status_id
     } = req.body;
 
-    // Validate required fields
-    if (!customer_id || !product_id || !paymentmethod_id || !order_status_id ||
-        paid_amount === undefined || due_amount === undefined || !portal_recharge_status_id) {
-        return res.status(400).json({ error: 'Missing required fields' });
+    // Validate ALL required fields from your schema
+    if (!customer_id || !product_id || !paymentmethod_id || 
+        !order_status_id || paid_amount === undefined || 
+        due_amount === undefined || !portal_recharge_status_id) {
+        return res.status(400).json({ 
+            error: 'Missing required fields',
+            required_fields: [
+                'customer_id',
+                'product_id',
+                'paymentmethod_id',
+                'order_status_id',
+                'paid_amount',
+                'due_amount',
+                'portal_recharge_status_id'
+            ]
+        });
     }
 
     try {
-        // Insert new order
         const result = await pool.query(
             `INSERT INTO orders (
-                customer_id, product_id, paymentmethod_id, recharge_by_id,
+                customer_id, product_id, paymentmethod_id, recharge_by_Id,  // Corrected here
                 order_status_id, paid_amount, due_amount, order_comments,
                 portal_recharge_status_id, created_at, updated_at
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
             RETURNING *`,
             [
-                customer_id, product_id, paymentmethod_id, recharge_by_id,
-                order_status_id, paid_amount, due_amount, order_comments,
+                customer_id, product_id, paymentmethod_id, recharge_by_Id || null,  // Corrected here
+                order_status_id, paid_amount, due_amount, order_comments || null,
                 portal_recharge_status_id
             ]
         );
 
         res.status(201).json({ order: result.rows[0] });
     } catch (err) {
-        console.error("Error creating order:", err);
-        res.status(500).json({ error: 'Failed to create order' });
+        console.error("Database Error:", err);
+        res.status(500).json({ 
+            error: 'Failed to create order',
+            details: err.message,
+            hint: "Check if: (1) All foreign keys exist, (2) Column names match exactly"
+        });
     }
 });
 
