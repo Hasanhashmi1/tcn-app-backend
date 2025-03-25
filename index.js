@@ -55,7 +55,7 @@ app.post('/orders', async (req, res) => {
         customer_id,
         product_id,
         paymentmethod_id,
-        recharge_by_Id,  // This JavaScript comment is fine (outside SQL string)
+        recharge_by_id,  // This JavaScript comment is fine (outside SQL string)
         order_status_id,
         paid_amount,
         due_amount,
@@ -84,7 +84,7 @@ app.post('/orders', async (req, res) => {
     try {
         const result = await pool.query(
             `INSERT INTO orders (
-                customer_id, product_id, paymentmethod_id, recharge_by_Id,
+                customer_id, product_id, paymentmethod_id, "recharge_by_id", 
                 order_status_id, paid_amount, due_amount, order_comments,
                 portal_recharge_status_id, created_at, updated_at
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
@@ -93,7 +93,7 @@ app.post('/orders', async (req, res) => {
                 customer_id, 
                 product_id, 
                 paymentmethod_id, 
-                recharge_by_Id || null,
+                recharge_by_id || null,
                 order_status_id, 
                 paid_amount, 
                 due_amount, 
@@ -170,6 +170,15 @@ app.delete('/orders/:id', async (req, res) => {
         res.status(500).json({ error: 'Failed to delete order' });
     }
 });
+
+process.on('uncaughtException', (err) => {
+    console.error('Uncaught Exception:', err);
+    process.exit(1);
+  });
+  
+  process.on('unhandledRejection', (err) => {
+    console.error('Unhandled Rejection:', err);
+  });
 
 // Start the server
 app.listen(PORT, () => {
