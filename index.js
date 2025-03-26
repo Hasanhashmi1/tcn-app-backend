@@ -1,6 +1,8 @@
 const express = require('express');
 const { Pool } = require('pg');
 const cors = require('cors');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 require('dotenv').config();
 
 const app = express();
@@ -9,16 +11,22 @@ app.use(cors());
 
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
+    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 });
 
 const PORT = process.env.PORT || 5000;
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+    console.error(err.stack);
+    res.status(500).json({ error: 'Something went wrong!' });
+});
 
 // Orders CRUD Endpoints
 
 // Get all orders
 app.get('/orders', async (req, res) => {
     try {
-        const payment_status= 1;
         const result = await pool.query(
             'SELECT * FROM orders WHERE order_status_id = 4 ORDER BY created_at DESC'
         );
@@ -50,13 +58,13 @@ app.get('/orders/:id', async (req, res) => {
     }
 });
 
-// Create new order - CORRECTED to match your schema
+// Create new order
 app.post('/orders', async (req, res) => {
     const {
         customer_id,
         product_id,
         paymentmethod_id,
-        recharge_by_id,  // This JavaScript comment is fine (outside SQL string)
+        recharge_by_id,
         order_status_id,
         paid_amount,
         due_amount,
@@ -64,7 +72,6 @@ app.post('/orders', async (req, res) => {
         portal_recharge_status_id
     } = req.body;
 
-    // Input validation (JavaScript comment - OK)
     if (!customer_id || !product_id || !paymentmethod_id || 
         !order_status_id || paid_amount === undefined || 
         due_amount === undefined || !portal_recharge_status_id) {
@@ -108,16 +115,12 @@ app.post('/orders', async (req, res) => {
         console.error("Database Error:", err);
         res.status(500).json({ 
             error: 'Failed to create order',
-            details: err.message,
-            hint: "Check: (1) Foreign keys exist (2) Column names match exactly (3) No syntax errors in query"
+            details: err.message
         });
     }
 });
 
-
-
-
-// Get all customers (without user join)
+// Get all customers
 app.get('/customers', async (req, res) => {
     try {
         const result = await pool.query(`
@@ -131,7 +134,7 @@ app.get('/customers', async (req, res) => {
     }
 });
 
-// Get single customer by ID (without user join)
+// Get single customer by ID
 app.get('/customers/:id', async (req, res) => {
     const { id } = req.params;
     
@@ -152,10 +155,10 @@ app.get('/customers/:id', async (req, res) => {
     }
 });
 
-// Create new customer (without foreign key validation)
+// Create new customer
 app.post('/customers', async (req, res) => {
     const {
-        user_id = null,  // Default to null if not provided
+        user_id = null,
         address,
         vc_number,
         stb_number,
@@ -165,7 +168,6 @@ app.post('/customers', async (req, res) => {
         subscription_expires_on
     } = req.body;
 
-    // Validation (user_id is now optional)
     if (!address || !vc_number || !stb_number || !area_id) {
         return res.status(400).json({ 
             error: 'Missing required fields',
@@ -182,12 +184,12 @@ app.post('/customers', async (req, res) => {
         const result = await pool.query(`
             INSERT INTO customers (
                 user_id, address, vc_number, stb_number, area_id,
-                 subscription_status,
+                subscription_status,
                 installation_date, subscription_expires_on
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING *
         `, [
-            user_id,  // Can be null or any value
+            user_id,
             address,
             vc_number,
             stb_number,
@@ -207,46 +209,61 @@ app.post('/customers', async (req, res) => {
     }
 });
 
-
 // Signup Route
-
 app.post('/signup', async (req, res) => {
-    const { first_name, last_name, email, password, user_type_id, mobile_phone } = req.body;
-
-    // Validate request body
-    if (!first_name || !last_name || !email || !password || !user_type_id || !mobile_phone) {
-        return res.status(400).json({ error: 'All fields are required' });
-    }
-
-    // Validate mobile number (must be exactly 10 digits)
-    if (!/^\d{10}$/.test(mobile_phone)) {
-        return res.status(400).json({ error: 'Mobile number must be exactly 10 digits' });
-    }
-
     try {
-        // Check if the email already exists
+        const { first_name, last_name, email, password, user_type_id, mobile_phone } = req.body;
+        
+        // Add validation logging
+        console.log("Received signup data:", req.body);
+
+        if (!first_name || !last_name || !email || !password || !user_type_id || !mobile_phone) {
+            console.log("Missing fields detected");
+            return res.status(400).json({ 
+                error: 'All fields are required',
+                received: req.body 
+            });
+        }
+
+        // Check email exists
         const userExists = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
         if (userExists.rows.length > 0) {
             return res.status(400).json({ error: 'Email already exists' });
         }
 
-        // Hash the password
-        const salt = await bcrypt.genSalt(10);
-        const passwordHash = await bcrypt.hash(password, salt);
+        // Hash password with error handling
+        let hashedPassword;
+        try {
+            hashedPassword = await bcrypt.hash(password, 10);
+        } catch (hashError) {
+            console.error("Password hashing failed:", hashError);
+            return res.status(500).json({ error: 'Password processing failed' });
+        }
 
-        // Insert user into the database
+        // Create user
         const result = await pool.query(
-            `INSERT INTO users 
-        (first_name, last_name, email, password, user_type_id, mobile_phone, created_at, updated_at) 
-        VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW()) 
-        RETURNING id, first_name, last_name, email, user_type_id, mobile_phone`,
-            [first_name, last_name, email, passwordHash, user_type_id, mobile_phone]
+            `INSERT INTO users (first_name, last_name, email, password, user_type_id, mobile_phone, created_at, updated_at) 
+             VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW()) 
+             RETURNING id, first_name, last_name, email, user_type_id, mobile_phone`,
+            [first_name, last_name, email, hashedPassword, user_type_id, mobile_phone]
         );
+        
 
-        res.status(201).json({ message: 'User created', user: result.rows[0] });
+        return res.status(201).json({ 
+            message: 'User created successfully', 
+            user: result.rows[0] 
+        });
+
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'An error occurred during signup' });
+        console.error("FULL SIGNUP ERROR:", {
+            message: err.message,
+            stack: err.stack,
+            raw: err
+        });
+        return res.status(500).json({ 
+            error: 'Signup failed',
+            details: err.message  // Send actual error to frontend
+        });
     }
 });
 
@@ -254,55 +271,62 @@ app.post('/signup', async (req, res) => {
 app.post('/login', async (req, res) => {
     const { email, password } = req.body;
 
+    if (!email || !password) {
+        return res.status(400).json({ error: 'Email and password are required' });
+    }
+
     try {
-        // Find the user by email
+        // Find user by email
         const result = await pool.query('SELECT * FROM users WHERE email = $1', [email]);
         const user = result.rows[0];
 
         if (!user) {
-            return res.status(404).json({ error: 'User not found' });
+            return res.status(401).json({ error: 'Invalid email or password' });
         }
 
-        // Compare passwords
+        // Compare the password with the hashed password
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) {
-            return res.status(400).json({ error: 'Invalid credentials' });
+            return res.status(401).json({ error: 'Invalid email or password' });
         }
 
-        // Generate a JWT token
-        const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: '1h' });
+        // Generate JWT Token
+        const token = jwt.sign(
+            { userId: user.id, email: user.email, userType: user.user_type_id },
+            process.env.JWT_SECRET,
+            { expiresIn: '1h' }
+        );
 
-        res.status(200).json({ message: 'Login successful', token });
+        res.status(200).json({
+            message: 'Login successful',
+            token,
+            user: {
+                id: user.id,
+                first_name: user.first_name,
+                last_name: user.last_name,
+                email: user.email,
+                user_type_id: user.user_type_id,
+                mobile_phone: user.mobile_phone
+            }
+        });
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'An error occurred during login' });
+        console.error("Login Error:", err);
+        res.status(500).json({ error: 'Login failed', details: err.message });
     }
 });
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
+// Error handling
 process.on('uncaughtException', (err) => {
     console.error('Uncaught Exception:', err);
     process.exit(1);
-  });
-  
-  process.on('unhandledRejection', (err) => {
-    console.error('Unhandled Rejection:', err);
-  });
+});
 
-// Start the server
+process.on('unhandledRejection', (err) => {
+    console.error('Unhandled Rejection:', err);
+});
+
+// Start server
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });
