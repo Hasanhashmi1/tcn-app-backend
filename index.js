@@ -18,8 +18,9 @@ const PORT = process.env.PORT || 5000;
 // Get all orders
 app.get('/orders', async (req, res) => {
     try {
+        const payment_status= 1;
         const result = await pool.query(
-            'SELECT * FROM orders ORDER BY created_at DESC'
+            'SELECT * FROM orders WHERE order_status_id = 4 ORDER BY created_at DESC'
         );
         res.status(200).json({ orders: result.rows });
     } catch (err) {
@@ -193,7 +194,7 @@ app.post('/customers', async (req, res) => {
             area_id,
             subscription_status || null,
             installation_date || null,
-            subscription_expires_on || null
+            subscription_expires_on || null,
         ]);
 
         res.status(201).json({ customer: result.rows[0] });
