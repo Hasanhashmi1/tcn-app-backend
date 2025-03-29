@@ -527,6 +527,74 @@ app.get('/api/user/me', async (req, res) => {
 
 
 
+// GET current UPI QR data
+app.get('/api/upi-qr', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT id, admin_name, upi_id, qr_image, created_at, admin_id
+      FROM upi_qr_data
+      ORDER BY created_at DESC
+      LIMIT 1`
+    );
+    res.json(result.rows[0] || null);
+  } catch (err) {
+    console.error('GET UPI QR Error:', err);
+    res.status(500).json({ error: 'Failed to fetch UPI QR data' });
+  }
+});
+
+// POST new UPI QR data
+app.post('/api/upi-qr', async (req, res) => {
+  try {
+    const { adminName, upiId, qrImage } = req.body;
+    const token = req.headers.authorization?.split(' ')[1];
+    
+    if (!token) return res.status(401).json({ error: 'Unauthorized' });
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+    // Clear existing and insert new
+    await pool.query('DELETE FROM upi_qr_data');
+    
+    const result = await pool.query(
+      `INSERT INTO upi_qr_data 
+       (admin_name, upi_id, qr_image, admin_id) 
+       VALUES ($1, $2, $3, $4)
+       RETURNING *`,
+      [adminName, upiId, qrImage, decoded.userId]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('POST UPI QR Error:', err);
+    res.status(500).json({ error: 'Failed to save UPI QR data' });
+  }
+});
+
+// DELETE UPI QR data
+app.delete('/api/upi-qr', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM upi_qr_data');
+    res.status(200).json({ message: 'UPI QR data deleted successfully' });
+  } catch (err) {
+    console.error('DELETE UPI QR Error:', err);
+    res.status(500).json({ error: 'Failed to delete UPI QR data' });
+  }
+});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
