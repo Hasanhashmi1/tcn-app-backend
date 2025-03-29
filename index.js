@@ -493,6 +493,41 @@ app.put('/orders/:id', async (req, res) => {
     }
 });
 
+// Add this endpoint to your existing backend
+app.get('/api/user/me', async (req, res) => {
+    try {
+      const token = req.headers.authorization?.split(' ')[1];
+      if (!token) return res.status(401).json({ error: 'Unauthorized' });
+  
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      
+      const user = await pool.query(
+        'SELECT first_name, last_name FROM users WHERE id = $1', 
+        [decoded.userId]
+      );
+  
+      if (user.rows.length === 0) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+  
+      res.json({
+        firstName: user.rows[0].first_name,
+        lastName: user.rows[0].last_name
+      });
+    } catch (err) {
+      console.error("User data error:", err);
+      res.status(500).json({ error: 'Failed to fetch user data' });
+    }
+  });
+
+
+
+
+
+
+
+
+
 
 
 // app.put('/customers/:id/subscription', async (req, res) => {
@@ -514,7 +549,7 @@ app.put('/orders/:id', async (req, res) => {
 //             [subscription_status, id]
 //         );
 
-//         if (!result.rows.length) return res.status(404).send('Customer not found');
+//         if (!(result.rows.length > 0)) return res.status(404).send('Customer not found');
         
 //         res.json({
 //             id: result.rows[0].id,
