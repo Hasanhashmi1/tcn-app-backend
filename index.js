@@ -5,14 +5,17 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
 
-const app = express();
+app.use(cors({
+    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    credentials: true
+}));
 app.use(express.json());
-app.use(cors());
 
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
     ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 });
+
 
 const PORT = process.env.PORT || 5000;
 
@@ -335,13 +338,13 @@ app.get('/field-users/:id/dues', async (req, res) => {
         );
 
         if (result.rows.length === 0) {
-            return res.status(404).json({ 
+            return res.status(404).json({
                 message: 'No pending dues found for this field user',
                 field_user_id: id
             });
         }
 
-        res.status(200).json({ 
+        res.status(200).json({
             field_user_id: id,
             dues: result.rows,
             count: result.rows.length
@@ -382,7 +385,7 @@ app.get('/customers/:id/dues', async (req, res) => {
         );
 
         if (customerQuery.rows.length === 0) {
-            return res.status(404).json({ 
+            return res.status(404).json({
                 error: 'Customer not found',
                 customer_id: id
             });
@@ -430,7 +433,7 @@ app.get('/customers/:id/dues', async (req, res) => {
             query: 'Customer dues lookup',
             timestamp: new Date().toISOString()
         });
-        res.status(500).json({ 
+        res.status(500).json({
             error: 'Failed to fetch customer dues',
             details: process.env.NODE_ENV === 'development' ? err.message : null
         });
@@ -460,9 +463,9 @@ app.get('/pending-orders', async (req, res) => {
 
     } catch (err) {
         console.error('Error:', err);
-        res.status(500).json({ 
+        res.status(500).json({
             error: 'Failed to fetch orders',
-            message: err.message 
+            message: err.message
         });
     }
 });
@@ -496,110 +499,189 @@ app.put('/orders/:id', async (req, res) => {
 // Add this endpoint to your existing backend
 app.get('/api/user/me', async (req, res) => {
     try {
-      const token = req.headers.authorization?.split(' ')[1];
-      if (!token) return res.status(401).json({ error: 'Unauthorized' });
-  
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const token = req.headers.authorization?.split(' ')[1];
+        if (!token) return res.status(401).json({ error: 'Unauthorized' });
+
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+
+        const user = await pool.query(
+            'SELECT first_name, last_name FROM users WHERE id = $1',
+            [decoded.userId]
+        );
+
+        if (user.rows.length === 0) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        res.json({
+            firstName: user.rows[0].first_name,
+            lastName: user.rows[0].last_name
+        });
+    } catch (err) {
+        console.error("User data error:", err);
+        res.status(500).json({ error: 'Failed to fetch user data' });
+    }
+});
+
+
+
+
+
+
+
+
+
+
+// JWT Verification Middleware (only once)
+const verifyToken = (req, res, next) => {
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) {
+        return res.status(401).json({ success: false, message: 'Unauthorized - No token provided' });
+    }
+
+    try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        req.userId = decoded.userId;
+        next();
+    } catch (err) {
+        return res.status(401).json({ success: false, message: 'Unauthorized - Invalid token' });
+    }
+};
+
+/**
+* @api {get} /api/upi-qr Get UPI QR Data
+* @apiName GetUPIQR
+* @apiGroup UPIQR
+*/
+app.get('/api/upi-qr', async (req, res) => {
+    try {
+        const result = await pool.query(`
+        SELECT id, admin_name, upi_id, qr_image, created_at, admin_id
+        FROM upi_qr_data
+        ORDER BY created_at DESC
+        LIMIT 1`
+        );
+
+        if (result.rows.length > 0) {
+            res.json({
+                success: true,
+                data: result.rows[0]
+            });
+        } else {
+            res.json({
+                success: true,
+                data: null,
+                message: 'No UPI QR data found'
+            });
+        }
+    } catch (err) {
+        console.error('GET UPI QR Error:', err);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch UPI QR data',
+            error: process.env.NODE_ENV === 'development' ? err.message : null
+        });
+    }
+});
+
+
+
+
+/**
+ * @api {post} /api/upi-qr Create/Update UPI QR
+ * @apiName CreateUPIQR
+ * @apiGroup UPIQR
+ * @apiHeader {String} Authorization Bearer Token
+ * @apiParam {String} adminName Admin's name
+ * @apiParam {String} upiId Valid UPI ID (format: name@upi)
+ * @apiParam {String} [qrImage] Base64 encoded QR image (optional)
+ */
+app.post('/api/upi-qr', verifyToken, async (req, res) => {
+    try {
+      const { adminName, upiId, qrImage } = req.body;
       
-      const user = await pool.query(
-        'SELECT first_name, last_name FROM users WHERE id = $1', 
-        [decoded.userId]
-      );
-  
-      if (user.rows.length === 0) {
-        return res.status(404).json({ error: 'User not found' });
+      // Validation
+      if (!adminName || !upiId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Admin name and UPI ID are required'
+        });
       }
   
-      res.json({
-        firstName: user.rows[0].first_name,
-        lastName: user.rows[0].last_name
+      if (!/^[a-zA-Z0-9._-]+@[a-zA-Z0-9]+$/.test(upiId)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid UPI ID format (e.g., name@upi)'
+        });
+      }
+  
+      // Delete existing and insert new
+      await pool.query('DELETE FROM upi_qr_data WHERE admin_id = $1', [req.userId]);
+      
+      const result = await pool.query(
+        `INSERT INTO upi_qr_data 
+         (admin_name, upi_id, qr_image, admin_id) 
+         VALUES ($1, $2, $3, $4)
+         RETURNING *`,
+        [adminName, upiId, qrImage, req.userId]
+      );
+  
+      res.status(201).json({
+        success: true,
+        data: result.rows[0],
+        message: 'UPI QR data saved successfully'
       });
     } catch (err) {
-      console.error("User data error:", err);
-      res.status(500).json({ error: 'Failed to fetch user data' });
+      console.error('POST UPI QR Error:', err);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to save UPI QR data',
+        error: process.env.NODE_ENV === 'development' ? err.message : null
+      });
     }
   });
 
 
 
 
-
-
-
-
-// GET current UPI QR data
-app.get('/api/upi-qr', async (req, res) => {
+/**
+ * @api {delete} /api/upi-qr Delete UPI QR Data
+ * @apiName DeleteUPIQR
+ * @apiGroup UPIQR
+ * @apiHeader {String} Authorization Bearer Token
+ */
+app.delete('/api/upi-qr', verifyToken, async (req, res) => {
   try {
-    const result = await pool.query(`
-      SELECT id, admin_name, upi_id, qr_image, created_at, admin_id
-      FROM upi_qr_data
-      ORDER BY created_at DESC
-      LIMIT 1`
-    );
-    res.json(result.rows[0] || null);
-  } catch (err) {
-    console.error('GET UPI QR Error:', err);
-    res.status(500).json({ error: 'Failed to fetch UPI QR data' });
-  }
-});
-
-// POST new UPI QR data
-app.post('/api/upi-qr', async (req, res) => {
-  try {
-    const { adminName, upiId, qrImage } = req.body;
-    const token = req.headers.authorization?.split(' ')[1];
-    
-    if (!token) return res.status(401).json({ error: 'Unauthorized' });
-
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-    // Clear existing and insert new
-    await pool.query('DELETE FROM upi_qr_data');
-    
     const result = await pool.query(
-      `INSERT INTO upi_qr_data 
-       (admin_name, upi_id, qr_image, admin_id) 
-       VALUES ($1, $2, $3, $4)
-       RETURNING *`,
-      [adminName, upiId, qrImage, decoded.userId]
+      'DELETE FROM upi_qr_data WHERE admin_id = $1 RETURNING *',
+      [req.userId]
     );
+    
+    if (result.rowCount === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'No UPI QR data found to delete'
+      });
+    }
 
-    res.status(201).json(result.rows[0]);
-  } catch (err) {
-    console.error('POST UPI QR Error:', err);
-    res.status(500).json({ error: 'Failed to save UPI QR data' });
-  }
-});
-
-// DELETE UPI QR data
-app.delete('/api/upi-qr', async (req, res) => {
-  try {
-    await pool.query('DELETE FROM upi_qr_data');
-    res.status(200).json({ message: 'UPI QR data deleted successfully' });
+    res.json({
+      success: true,
+      message: 'UPI QR data deleted successfully',
+      deletedData: result.rows[0]
+    });
   } catch (err) {
     console.error('DELETE UPI QR Error:', err);
-    res.status(500).json({ error: 'Failed to delete UPI QR data' });
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete UPI QR data',
+      error: process.env.NODE_ENV === 'development' ? err.message : null
+    });
   }
 });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 // app.put('/customers/:id/subscription', async (req, res) => {
-    
+
 //     const { id } = req.params;
 //     const { subscription_status } = req.body;
 
@@ -618,7 +700,7 @@ app.delete('/api/upi-qr', async (req, res) => {
 //         );
 
 //         if (!(result.rows.length > 0)) return res.status(404).send('Customer not found');
-        
+
 //         res.json({
 //             id: result.rows[0].id,
 //             status: result.rows[0].subscription_status
@@ -629,42 +711,23 @@ app.delete('/api/upi-qr', async (req, res) => {
 //     }
 // });
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// Error handling
-process.on('uncaughtException', (err) => {
-    console.error('Uncaught Exception:', err);
-    process.exit(1);
-});
-
-process.on('unhandledRejection', (err) => {
-    console.error('Unhandled Rejection:', err);
-});
+// Error Handling Middleware
+app.use((req, res) => {
+    res.status(404).json({ error: 'Route not found' });
+  });
+  
+  app.use((err, req, res, next) => {
+    console.error('Global Error:', {
+      message: err.message,
+      stack: err.stack,
+      path: req.path,
+      timestamp: new Date().toISOString()
+    });
+    res.status(500).json({ 
+      error: 'Internal server error',
+      message: process.env.NODE_ENV === 'development' ? err.message : null
+    });
+  });
 
 // Start server
 app.listen(PORT, () => {
